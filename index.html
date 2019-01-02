@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Spider's Web</title>
+	<link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">	
+    <style>
+    	* { 
+			font-family: 'Roboto', sans-serif;
+			padding: 0; 
+			margin: 0; 
+		}
+		
+		.header {
+			width: 500px;
+		}
+		
+		.points {
+			text-align: left;
+			float: left;
+			-webkit-touch-callout: none;
+			-webkit-user-select: none;
+			-khtml-user-select: none;
+			-moz-user-select: none;
+			-ms-user-select: none;
+			user-select: none;			
+		}
+		
+		.buttons {
+			text-align: right;
+			-webkit-touch-callout: none;
+			-webkit-user-select: none;
+			-khtml-user-select: none;
+			-moz-user-select: none;
+			-ms-user-select: none;
+			user-select: none;			
+		}
+		
+		.container {
+		  position: relative;
+		  height: 100%; 
+		  width: 100%; 
+		  display: table-cell; 
+		}		
+		
+		.container > canvas {
+			position: absolute;
+			margin: 0 auto; 
+		}
+		
+    	canvas#gameboard { 
+			background: #eee; 
+			z-index: 0;
+		}
+		
+		canvas#sketch {
+			z-index: 1;
+		}
+    </style>
+	<script src="jquery-3.3.1.min.js"></script>	
+</head>
+<body>
+
+<div width="100%">
+
+	<div id="leftPanel">
+
+		<div class="header">
+			<div class="points">Score: </div>
+			<div class="buttons">
+			<a id="manualLink" href="#">How to play?</a>
+			<a id="restartLink" href="#">Restart</a></div>
+		</div>
+
+		<div class="container">
+			<canvas id="gameboard" width="500" height="400"></canvas>
+			<canvas id="sketch" width="500" height="400"></canvas>
+		</div>
+
+	</div>
+</div>
+
+<script src="gameboard.js"></script>
+<script src="candidates.js"></script>
+<script>
+	var canvas = document.getElementById("gameboard");
+	var ctx = canvas.getContext("2d");
+	
+	var sketchCanvas = document.getElementById("sketch");
+	var ctxSketch = sketchCanvas.getContext("2d");
+	
+	var maxHeight = canvas.height;
+	var maxWidth = canvas.width;
+	var cellSize = 20;
+
+	var GRID_COLOR = "#BBBBBB";
+	var HIGHLIGHTED_COLOR = '#ff0000';
+	var CANDIDATE_COLOR = '#bbbbbb';
+	
+	var GameState = {
+		CHOOSE_DOT : 1,
+		CHOOSE_LINE : 2,
+		GAME_OVER : 3
+	};
+	var state = GameState.CHOOSE_DOT;
+
+	function drawDot(context, X, Y, color) {
+		var R = 3;			
+		context.beginPath();
+		context.arc(X, Y, R, 0, 2 * Math.PI, false);
+		context.lineWidth = 3;
+		context.strokeStyle = color;
+		context.fillStyle = color;
+		context.fill();
+		context.stroke();				
+	}
+	
+	function drawLine(context, ax, ay, bx, by, color) {
+		context.lineWidth = 3;
+		context.strokeStyle = color;
+		context.beginPath();
+		context.moveTo(ax, ay);
+		context.lineTo(bx, by);
+		context.stroke(); 	
+	}
+
+	function isBetween(ax, ay, bx, by, cx, cy, tolerance) {
+		var distance = Math.abs((cy - by)*ax - (cx - bx)*ay + cx*by - cy*bx) / Math.sqrt(Math.pow((cy-by),2) + Math.pow((cx-bx),2));
+		if (distance > tolerance) { return false; }
+
+		var dotproduct = (cx - ax) * (bx - ax) + (cy - ay)*(by - ay);
+		if (dotproduct < 0) { return false; }
+
+		var squaredlengthba = (bx - ax)*(bx - ax) + (by - ay)*(by - ay);
+		if (dotproduct > squaredlengthba) { return false; }
+
+		return true;
+	}
+	
+	
+	function drawVerticalLines() {
+		var iksy = [];
+		var x = 0.5 + cellSize/2;
+		do {
+			iksy.push(x);
+		
+			ctx.beginPath();
+			ctx.moveTo(x, 0);
+			ctx.lineTo(x, maxHeight);
+			ctx.stroke(); 	
+			x += cellSize;
+		} while (x < maxWidth);
+		return iksy;
+	}
+	
+	function drawHorizontalLines() {
+		var igreki = [];
+		var y = 0.5 + cellSize/2;
+		do {
+			igreki.push(y);
+		
+			ctx.beginPath();
+			ctx.moveTo(0, y);
+			ctx.lineTo(maxWidth, y);
+			ctx.stroke(); 	
+			y += cellSize;
+		} while (y < maxHeight);
+		return igreki;
+	}	
+	
+	function calculateScore() {
+		var score = "Score: " + lines.length;
+		$("div.points").text(score);
+		
+		if (gameboard.candidates.length == 0) {
+			state = GameState.GAME_OVER;
+			ctxSketch.clearRect(0, 0, sketchCanvas.width, sketchCanvas.height);
+			
+			ctx.font = "50px Roboto";
+			ctx.fillStyle = '#ff0000';			
+			ctx.fillText("GAME OVER!", 96, 70);			
+		}
+	}
+	
+	function drawCandidates() {
+		// draw dots that can be connected in grey color:
+		$.each(gameboard.candidates, function(i, value) {
+			var position = gameboard.getRealCoordinates(value.x, value.y);
+			drawDot(ctxSketch, position.x, position.y, CANDIDATE_COLOR);
+		});
+	}	
+	
+	function refreshDrafts(mouseX, mouseY) {
+		ctxSketch.clearRect(0, 0, sketchCanvas.width, sketchCanvas.height);
+		document.body.style.cursor = 'default';
+		drawCandidates();
+
+		if (state == GameState.CHOOSE_DOT) {
+			currentCandidate = gameboard.isMouseOverPotentialDot(mouseX, mouseY);
+		} 
+		
+		if (currentCandidate !== null) {
+			document.body.style.cursor = 'crosshair';
+			var realPosition = gameboard.getRealCoordinates(currentCandidate.x, currentCandidate.y);
+			drawDot(ctxSketch, realPosition.x, realPosition.y, HIGHLIGHTED_COLOR);
+		} 
+		
+		if (state == GameState.CHOOSE_LINE) {
+			currentLine = null;
+			
+			for (var i in gameboard.lineCandidates) {
+				var a = gameboard.lineCandidates[i].start();
+				var b = gameboard.lineCandidates[i].end();
+
+				var realA = gameboard.getRealCoordinates(a);
+				var realB = gameboard.getRealCoordinates(b);
+				
+				var isMouseOverLine = isBetween(realA.x, realA.y, realB.x, realB.y, mouseX, mouseY, 10)
+					|| gameboard.isMouseOverDot(a, mouseX, mouseY) 
+					|| gameboard.isMouseOverDot(b, mouseX, mouseY);
+					
+				if (isMouseOverLine) {
+					document.body.style.cursor = 'crosshair';
+				
+					drawLine(ctxSketch, realA.x, realA.y, realB.x, realB.y, HIGHLIGHTED_COLOR);
+					drawDot(ctxSketch, realA.x, realA.y, HIGHLIGHTED_COLOR);
+					drawDot(ctxSketch, realB.x, realB.y, HIGHLIGHTED_COLOR);
+					
+					currentLine = gameboard.lineCandidates[i];
+					
+					// ignore the rest of lines:
+					break;
+				}
+								
+			}
+		}
+	};
+
+	function handleClick(mouseX, mouseY) {
+		if (state == GameState.CHOOSE_DOT && currentCandidate) {
+			gameboard.setFilled(currentCandidate.x, currentCandidate.y);
+			gameboard.drawDots();
+			
+			newDot = currentCandidate;
+			state = GameState.CHOOSE_LINE;
+			
+			gameboard.lineCandidates = $.map(gameboard.lineCandidates, function(line) {
+				return line.containsDot(newDot) ? line : null
+			});			
+			
+			//currentCandidate = null;
+			refreshDrafts(mouseX, mouseY);
+			return;
+		}
+		
+		if (state == GameState.CHOOSE_LINE && currentLine) {
+			var realA = gameboard.getRealCoordinates(currentLine.start());
+			var realB = gameboard.getRealCoordinates(currentLine.end());
+			drawLine(ctx, realA.x, realA.y, realB.x, realB.y, '#000000');
+
+			lines.push(currentLine);
+			currentLine = null;
+			currentCandidate = null;
+			
+			state = GameState.CHOOSE_DOT;
+			gameboard.rebuildCandidates();
+			calculateScore();
+		}
+	};
+	
+	function restartGame() {
+		ctx.clearRect(0, 0, sketchCanvas.width, sketchCanvas.height);
+		lines = [];
+		currentLine = null;
+		currentCandidate = null;
+		
+		ctx.lineWidth = 1;
+		ctx.strokeStyle = GRID_COLOR;
+		var iksy = drawVerticalLines();
+		var igreki = drawHorizontalLines();
+		gameboard = new Gameboard(iksy, igreki);
+		gameboard.rebuildCandidates();
+		drawCandidates();
+		state = GameState.CHOOSE_DOT;
+		calculateScore();
+	}
+	
+	sketchCanvas.onmousemove = function(e) {
+		var rect = this.getBoundingClientRect(),
+			x = e.clientX - rect.left,
+			y = e.clientY - rect.top;
+		refreshDrafts(x, y);
+	}
+	sketchCanvas.onclick = function(e) {
+		var rect = this.getBoundingClientRect(),
+			x = e.clientX - rect.left,
+			y = e.clientY - rect.top;
+		handleClick(x, y);
+	}
+	
+	$('#restartLink').click(function() {  
+		restartGame(); 
+		return false; 
+	});	
+
+	$('#manualLink').click(function(event) {  
+		var newwindow = window.open("manual.html", 'how to play?', 'height=300,width=400');
+		if (window.focus) {
+			newwindow.focus()
+		}
+		return false; 
+	});	
+
+	
+	var currentCandidate;
+	var newDot;
+	
+	// "lines" stores all drawn segments:
+	var lines = [];
+	var currentLine = null;
+	
+	restartGame();
+	
+</script>
+
+</body>
+</html>
